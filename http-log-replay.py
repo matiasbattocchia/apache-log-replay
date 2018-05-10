@@ -19,13 +19,13 @@ regexp = re.compile(NGINX)
 
 TIME_FORMAT = "%d/%b/%Y:%H:%M:%S %z"
 
-def main(filename, proxy, speedup=1):
+def main(filename, proxy, speedup, host):
     """Setup and start replaying."""
     requests = parse_logfile(filename)
     setup_http_client(proxy)
-    replay(requests, speedup)
+    replay(requests, speedup, host)
 
-def replay(requests, speedup):
+def replay(requests, speedup, host):
     """Replay the requests passed as argument"""
     # time sort requests
     requests = sorted(requests, key=itemgetter('time'))
@@ -47,8 +47,13 @@ def replay(requests, speedup):
         last_time = request['time']
 
         try:
+            if host:
+                url = re.sub('//.+?/', '//'+host+'/', request['url'])
+            else:
+                url = request['url']
+
             req_result = "OK"
-            urllib.request.urlopen(request['url'])
+            urllib.request.urlopen(url)
         except Exception:
             req_result = "FAILED"
         print("[%s] REQUEST: %s -- %s"
@@ -96,9 +101,12 @@ if __name__ == "__main__":
         dest='speedup',
         type='int',
         default=1)
+    parser.add_option('-i', '--ip',
+        help='use given IP instead of requests\' host',
+        dest='host')
     (options, args) = parser.parse_args()
     if len(args) == 1:
-        main(args[0], options.proxy, options.speedup)
+        main(args[0], options.proxy, options.speedup, options.host)
     else:
         parser.error("incorrect number of arguments")
 
