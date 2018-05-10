@@ -11,6 +11,7 @@ from datetime import datetime
 from optparse import OptionParser
 from operator import itemgetter
 import re
+from multiprocessing import Process
 
 # Default log format
 NGINX = '(?P<remote_addr>.+?) - (?P<remote_user>.+?) \[(?P<time_local>.+?)\] "GET (?P<url>.+?) HTTP/1.1" (?P<status>.+?) (?P<body_bytes_sent>.+?) "(?P<http_referer>.+?)" "(?P<http_user_agent>.+?)"'
@@ -24,6 +25,17 @@ def main(filename, proxy, speedup, host):
     requests = parse_logfile(filename)
     setup_http_client(proxy)
     replay(requests, speedup, host)
+
+
+def urlopen(request):
+    try:
+        req_result = "OK"
+        urllib.request.urlopen(request['url'])
+    except Exception:
+        req_result = "FAILED"
+    print("[%s] REQUEST: %s -- %s"
+        % (request['time'].strftime("%H:%M:%S"), request['url'], req_result))
+
 
 def replay(requests, speedup, host):
     """Replay the requests passed as argument"""
@@ -39,6 +51,9 @@ def replay(requests, speedup, host):
     for request in requests:
         time_delta = (request['time'] - last_time) // speedup
 
+        if host:
+            request['url'] = re.sub('//.+?/', '//'+host+'/', request['url'])
+
         if time_delta:
             if time_delta.seconds > 10:
                 print("(next request in %d seconds)" % time_delta.seconds)
@@ -46,18 +61,7 @@ def replay(requests, speedup, host):
 
         last_time = request['time']
 
-        try:
-            if host:
-                url = re.sub('//.+?/', '//'+host+'/', request['url'])
-            else:
-                url = request['url']
-
-            req_result = "OK"
-            urllib.request.urlopen(url)
-        except Exception:
-            req_result = "FAILED"
-        print("[%s] REQUEST: %s -- %s"
-            % (request['time'].strftime("%H:%M:%S"), request['url'], req_result))
+        Process(target=urlopen, args=(request,)).start()
 
 def setup_http_client(proxy):
     """Configure proxy server and install HTTP opener"""
