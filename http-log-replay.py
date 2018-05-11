@@ -20,24 +20,24 @@ regexp = re.compile(NGINX)
 
 TIME_FORMAT = "%d/%b/%Y:%H:%M:%S %z"
 
-def main(filename, proxy, speedup, host):
+def main(filename, options):
     """Setup and start replaying."""
     requests = parse_logfile(filename)
-    setup_http_client(proxy)
-    replay(requests, speedup, host)
+    setup_http_client(options.proxy)
+    replay(requests, options.speedup, options.ip)
 
 
-def urlopen(request):
+def urlopen(request_time, request_object):
     try:
-        req_result = "OK"
-        urllib.request.urlopen(request['url'])
+        result = "OK"
+        urllib.request.urlopen(request_object)
     except Exception:
-        req_result = "FAILED"
+        result = "FAILED"
     print("[%s] REQUEST: %s -- %s"
-        % (request['time'].strftime("%H:%M:%S"), request['url'], req_result))
+        % (request_time.strftime("%H:%M:%S"), request_object.full_url, result))
 
 
-def replay(requests, speedup, host):
+def replay(requests, speedup, ip):
     """Replay the requests passed as argument"""
     # time sort requests
     requests = sorted(requests, key=itemgetter('time'))
@@ -51,17 +51,25 @@ def replay(requests, speedup, host):
     for request in requests:
         time_delta = (request['time'] - last_time) // speedup
 
-        if host:
-            request['url'] = re.sub('//.+?/', '//'+host+'/', request['url'])
+        if ip:
+            m = re.match('https?://(?P<host>.+?)(/|$)')
 
-        if time_delta:
-            if time_delta.seconds > 10:
-                print("(next request in %d seconds)" % time_delta.seconds)
-            time.sleep(time_delta.seconds)
+            if not m:
+                continue
+
+            url = re.sub(m.group('host'), ip, request['url'])
+            request_object = urllib.request.Request(url)
+            request_object.add_header('X-Forwarded-Host', m.group('host'))
+        else:
+            request_object = urllib.request.Request(request['url'])
+
+        if time_delta.seconds > 10:
+            print("(next request in %d seconds)" % time_delta.seconds)
+        time.sleep(time_delta.seconds)
+
+        Process(target=urlopen, args=(request['time'], request_object)).start()
 
         last_time = request['time']
-
-        Process(target=urlopen, args=(request,)).start()
 
 def setup_http_client(proxy):
     """Configure proxy server and install HTTP opener"""
@@ -107,10 +115,9 @@ if __name__ == "__main__":
         default=1)
     parser.add_option('-i', '--ip',
         help='use given IP instead of requests\' host',
-        dest='host')
+        dest='ip')
     (options, args) = parser.parse_args()
     if len(args) == 1:
-        main(args[0], options.proxy, options.speedup, options.host)
+        main(args[0], options)
     else:
         parser.error("incorrect number of arguments")
-
